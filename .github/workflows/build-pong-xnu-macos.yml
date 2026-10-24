@@ -85,6 +85,21 @@ jobs:
         working-directory: unixnu
         run: ./unixnu defconfig pong_defconfig -D "$GITHUB_WORKSPACE/device"
 
+      - name: Normalize 20G81 restore component names
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('device/board.toml')
+          text = path.read_text()
+          old = 'fetch = ["KernelCache", "DeviceTree", "StaticTrustCache", "Cryptex1", "Cryptex1,SystemTrustCache", "OS"]'
+          new = 'fetch = ["KernelCache", "DeviceTree", "StaticTrustCache", "Cryptex1,SystemOS", "Cryptex1,SystemTrustCache", "OS"]'
+          if old not in text:
+              raise SystemExit('unexpected Pong board.toml fetch list')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Fetch pinned source repositories
         working-directory: unixnu
         env:
@@ -99,7 +114,7 @@ jobs:
           set -euo pipefail
           for attempt in 1 2 3; do
             echo "IPSW fetch attempt $attempt"
-            if ./unixnu ipsw fetch; then
+            if UNIXNU_ROOT="$GITHUB_WORKSPACE/unixnu" python3 "$GITHUB_WORKSPACE/device/scripts/fetch-ios16-assets.py"; then
               exit 0
             fi
             sleep 20
