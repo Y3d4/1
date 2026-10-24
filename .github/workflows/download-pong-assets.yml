@@ -1,0 +1,79 @@
+name: Download Pong iOS 20G81 Assets
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    runs-on: macos-15
+
+    steps:
+      - name: Clone UniXNU core
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pong"
+          git clone --depth=1 \
+            https://github.com/UniXNU/UniXNU.git \
+            "$RUNNER_TEMP/pong/UniXNU"
+
+      - name: Prepare device repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 \
+            https://github.com/Chengdong-Yu/UniXNU-pong.git \
+            "$RUNNER_TEMP/pong/UniXNU-pong"
+
+          # BuildManifest uses the qualified Cryptex1,SystemOS component name.
+          sed -i '' \
+            's/"Cryptex1",/"Cryptex1,SystemOS",/' \
+            "$RUNNER_TEMP/pong/UniXNU-pong/board.toml"
+
+      - name: Download restore components
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/pong/UniXNU"
+
+          for attempt in 1 2 3; do
+            echo "Download attempt: $attempt"
+            if python3 ../UniXNU-pong/scripts/fetch-ios16-assets.py; then
+              exit 0
+            fi
+            echo "Download failed; retrying in 20 seconds..."
+            sleep 20
+          done
+
+          exit 1
+
+      - name: Verify complete download
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/pong/UniXNU/out/ipsw/20G81"
+
+          find "$out" -maxdepth 1 -type f \
+            -exec shasum -a 256 {} \; | sort
+
+          if find "$out" -maxdepth 1 -name '*.partial' -print -quit | grep -q .; then
+            echo 'A partial file remains; refusing to upload it.' >&2
+            exit 1
+          fi
+
+          test -f "$out/096-56782-083.dmg"
+          test -f "$out/096-56782-083.dmg.trustcache"
+          test -f "$out/096-57366-083.dmg"
+          test -f "$out/096-57366-083.dmg.trustcache"
+          test -f "$out/DeviceTree.j120ap.im4p"
+          test -f "$out/kernelcache.release.ipad7"
+
+      - name: Upload downloaded assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: pong-ios-16.6.1-20G81-assets
+          path: ${{ runner.temp }}/pong/UniXNU/out/ipsw/20G81/*
+          retention-days: 7
