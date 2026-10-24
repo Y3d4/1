@@ -90,14 +90,19 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('device/board.toml')
           text = path.read_text()
-          old = 'fetch = ["KernelCache", "DeviceTree", "StaticTrustCache", "Cryptex1", "Cryptex1,SystemTrustCache", "OS"]'
-          new = 'fetch = ["KernelCache", "DeviceTree", "StaticTrustCache", "Cryptex1,SystemOS", "Cryptex1,SystemTrustCache", "OS"]'
-          if old not in text:
+          text, count = re.subn(
+              r'(?m)^fetch = \[.*\]$',
+              'fetch = ["KernelCache"]',
+              text,
+              count=1,
+          )
+          if count != 1:
               raise SystemExit('unexpected Pong board.toml fetch list')
-          path.write_text(text.replace(old, new, 1))
+          path.write_text(text)
           PY
 
       - name: Fetch pinned source repositories
