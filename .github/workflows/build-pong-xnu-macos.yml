@@ -110,8 +110,10 @@ jobs:
           set -euo pipefail
           # UniXNU main's generic patch targets XNU 10063. Pong pins XNU
           # 8796.141.3, for which the device repository carries the matching
-          # iOS 16 patch. Keep that device patch and omit the generic one.
+          # iOS 16 patch. Both repositories also contain the generic patch,
+          # so remove both copies and keep only the Pong-specific one.
           rm -f unixnu/patches/xnu/external-archive-dependencies.patch
+          rm -f device/patches/xnu/external-archive-dependencies.patch
           test -f device/patches/xnu/ios16-external-archive-dependencies.patch
 
       - name: Fetch pinned source repositories
