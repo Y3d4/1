@@ -72,8 +72,21 @@ jobs:
           test -f "$out/kernelcache.release.ipad7"
 
       - name: Upload downloaded assets
-        uses: actions/upload-artifact@v4
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/pong/UniXNU/out/ipsw/20G81"
+          archive="$RUNNER_TEMP/pong-ios-16.6.1-20G81-assets.tar"
+
+          # Upload one archive so gh can safely download it without absolute
+          # runner paths being recreated during extraction.
+          tar -cf "$archive" -C "$out" .
+          shasum -a 256 "$archive" > "$archive.sha256"
+
+      - uses: actions/upload-artifact@v4
         with:
           name: pong-ios-16.6.1-20G81-assets
-          path: ${{ runner.temp }}/pong/UniXNU/out/ipsw/20G81/*
+          path: |
+            ${{ runner.temp }}/pong-ios-16.6.1-20G81-assets.tar
+            ${{ runner.temp }}/pong-ios-16.6.1-20G81-assets.tar.sha256
           retention-days: 7
