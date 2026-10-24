@@ -105,6 +105,14 @@ jobs:
           path.write_text(text)
           PY
 
+      - name: Disable stale duplicate XNU patch
+        run: |
+          set -euo pipefail
+          # The current UniXNU XNU tree already contains the newer
+          # external-archive dependency location. The iOS 16 patch targets
+          # the old MakeInc.kernel context and fails before compilation.
+          rm -f device/patches/xnu/ios16-external-archive-dependencies.patch
+
       - name: Fetch pinned source repositories
         working-directory: unixnu
         env:
