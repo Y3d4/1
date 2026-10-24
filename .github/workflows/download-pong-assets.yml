@@ -86,7 +86,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: pong-ios-16.6.1-20G81-assets
-          path: |
-            artifact/pong-ios-16.6.1-20G81-assets.tar
-            artifact/pong-ios-16.6.1-20G81-assets.tar.sha256
+          path: artifact/pong-ios-16.6.1-20G81-assets.tar
           retention-days: 7
