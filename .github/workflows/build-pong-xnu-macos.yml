@@ -1,0 +1,167 @@
+name: Build Pong XNU on macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pong-xnu-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+  HOMEBREW_NO_ENV_HINTS: 1
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out UniXNU core
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU
+          ref: main
+          path: unixnu
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check out Pong device repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref_name }}
+          path: device
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check runner and device inputs
+        working-directory: unixnu
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          test -f ../device/board.toml
+          test -f ../device/configs/pong_defconfig
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphoneos --find mig
+          sw_vers
+          uname -m
+          df -h "$GITHUB_WORKSPACE"
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          brew install llvm lld mtools dtc unifdef
+
+      - name: Report toolchain
+        working-directory: unixnu
+        run: |
+          set -euo pipefail
+          for tool in git make clang cmake ninja unifdef ld.lld mformat mcopy dtc xcodebuild; do
+            path=$(command -v "$tool" || true)
+            printf '%-12s %s\n' "$tool" "${path:-MISSING}"
+            test -n "$path"
+          done
+          python3 --version
+          clang --version | head -n 1
+          "$(brew --prefix llvm)/bin/clang" --version | head -n 1
+
+      - name: Select Pong configuration
+        working-directory: unixnu
+        run: ./unixnu defconfig pong_defconfig -D "$GITHUB_WORKSPACE/device"
+
+      - name: Fetch pinned source repositories
+        working-directory: unixnu
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./unixnu fetch
+
+      - name: Fetch iOS 16.6.1 build inputs
+        working-directory: unixnu
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "IPSW fetch attempt $attempt"
+            if ./unixnu ipsw fetch; then
+              exit 0
+            fi
+            sleep 20
+          done
+          exit 1
+
+      - name: Build Pong kernel
+        id: kernel
+        working-directory: unixnu
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./unixnu build kernel -j 4
+
+      - name: Validate and stage kernel artifact
+        working-directory: unixnu
+        run: |
+          set -euo pipefail
+          kernel="out/pong/kernel/kernel.macho"
+          test -s "$kernel"
+          mkdir -p "$GITHUB_WORKSPACE/artifact"
+          cp "$kernel" "$GITHUB_WORKSPACE/artifact/pong-kernel.macho"
+          cp out/pong/.config "$GITHUB_WORKSPACE/artifact/pong.config"
+          shasum -a 256 "$kernel" | tee "$GITHUB_WORKSPACE/artifact/pong-kernel.macho.sha256"
+          {
+            echo "UniXNU core: $(git -C "$GITHUB_WORKSPACE/unixnu" rev-parse HEAD)"
+            echo "Pong device: $(git -C "$GITHUB_WORKSPACE/device" rev-parse HEAD)"
+            echo "Kernel: $kernel"
+            echo "Kernel bytes: $(stat -f %z "$kernel")"
+            echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+            echo "SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+          } | tee "$GITHUB_WORKSPACE/artifact/build-info.txt"
+
+      - name: Upload Pong kernel
+        if: always() && steps.kernel.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pong-xnu-kernel-${{ github.run_number }}
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pong-xnu-logs-${{ github.run_number }}
+          path: |
+            unixnu/out/pong/logs/*.log
+            unixnu/out/pong/.config
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Build summary
+        if: always()
+        working-directory: unixnu
+        run: |
+          {
+            echo "## Pong XNU macOS build"
+            echo
+            echo "- kernel step: ${{ steps.kernel.outcome }}"
+            if [ -s out/pong/kernel/kernel.macho ]; then
+              echo "- kernel sha256: $(shasum -a 256 out/pong/kernel/kernel.macho | awk '{print $1}')"
+              echo "- kernel bytes: $(stat -f %z out/pong/kernel/kernel.macho)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
